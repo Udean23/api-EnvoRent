@@ -59,4 +59,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Get Me
     Route::get('/me', [UserController::class, 'getProfile']);
+
+    // Activity Logs
+    Route::get('/activity-logs', [App\Http\Controllers\ActivityLogController::class, 'index']);
 });
