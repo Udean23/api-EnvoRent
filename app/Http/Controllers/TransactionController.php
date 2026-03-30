@@ -42,7 +42,7 @@ class TransactionController extends Controller
         $validated = $request->validate([
             'user_id' => 'required|exists:users,id',
             'price' => 'required|numeric|min:0',
-            'status' => 'nullable|in:pending,completed,cancelled,accepted',
+            'status' => 'nullable|in:pending,completed,cancelled,accepted,done,returning,returned',
             'materials' => 'required|array|min:1',
             'materials.*.product_id' => [
                 'nullable',
@@ -142,25 +142,25 @@ class TransactionController extends Controller
     /**
      * Remove the specified resource from storage.
      */
-    public function destroy(Transaction $transaction, $id)
+    public function requestReturn($id)
     {
         $transaction = Transaction::find($id);
         if (!$transaction) {
-            return response()->json([
-                'message' => 'Transaction not found'
-            ], 404);
+            return response()->json(['message' => 'Transaction not found'], 404);
         }
 
-        $transaction->delete();
+        if ($transaction->status !== 'done') {
+            return response()->json(['message' => 'Can only return completed transactions'], 400);
+        }
+
+        $transaction->update(['status' => 'returning']);
 
         ActivityLog::create([
             'user_id' => auth()->user()->id,
-            'description' => 'Deleted a transaction',
+            'description' => "Requested return for transaction {$id}",
             'activity_type' => 'crud'
         ]);
 
-        return response()->json([
-            'message' => 'Transaction deleted successfully'
-        ]);
+        return response()->json(['message' => 'Return request submitted successfully']);
     }
 }

@@ -101,9 +101,27 @@ class PaymentController extends Controller
         ]);
 
         if (in_array($payload['transaction_status'], ['settlement', 'capture'])) {
-            $payment->transaction->update([
-                'status' => 'done',
-            ]);
+            $transaction = $payment->transaction;
+            $transaction->update(['status' => 'done']);
+
+            foreach ($transaction->materials as $mat) {
+                if ($mat->product_id) {
+                    $product = \App\Models\Product::find($mat->product_id);
+                    if ($product) {
+                        $product->decrement('stock', $mat->quantity);
+                    }
+                } elseif ($mat->bundling_id) {
+                    $bundling = \App\Models\Bundling::with('materials')->find($mat->bundling_id);
+                    if ($bundling) {
+                        foreach ($bundling->materials as $bMat) {
+                            $product = \App\Models\Product::find($bMat->product_id);
+                            if ($product) {
+                                $product->decrement('stock', $bMat->quantity * $mat->quantity);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         return response()->json(['message' => 'Webhook processed']);
