@@ -13,13 +13,7 @@ class BundlingController extends Controller
      */
     public function index()
     {
-        $bundlings = Bundling::with('materials')->get();
-
-        ActivityLog::create([
-            'user_id' => auth()->user()->id,
-            'description' => 'Viewed all bundlings',
-            'activity_type' => 'crud'
-        ]);
+        $bundlings = Bundling::with('materials.product')->get();
 
         return response()->json([
             'bundlings' => $bundlings
@@ -43,20 +37,24 @@ class BundlingController extends Controller
             'name' => 'required|string|max:255',
             'price' => 'required|numeric|min:0',
             'category_id' => 'required|exists:categories,id',
-            'image' => 'nullable',
+            'description' => 'required|string',
+            'image' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
             'materials' => 'required|array',
             'materials.*.product_id' => 'required_with:materials|exists:products,id',
             'materials.*.quantity' => 'required_with:materials|integer|min:1',
         ]);
 
+        if ($request->hasFile('image')) {
+            $validated['image'] = $request->file('image')->store('bundlings', 'public');
+        }
+
         $bundling = Bundling::create($validated);
-        if (isset($validated['materials'])) {
-            foreach ($validated['materials'] as $material) {
-                $bundling->materials()->create([
-                    'product_id' => $material['product_id'],
-                    'quantity' => $material['quantity'],
-                ]);
-            }
+
+        foreach ($validated['materials'] as $material) {
+            $bundling->materials()->create([
+                'product_id' => $material['product_id'],
+                'quantity' => $material['quantity'],
+            ]);
         }
 
         ActivityLog::create([
@@ -65,13 +63,10 @@ class BundlingController extends Controller
             'activity_type' => 'crud'
         ]);
 
-        return response()->json(
-            [
-                'message' => 'Bundling created successfully',
-                'bundling' => $bundling->load('materials')
-            ],
-            201
-        );
+        return response()->json([
+            'message' => 'Bundling created successfully',
+            'bundling' => $bundling->load('materials.product')
+        ], 201);
     }
 
     /**
@@ -109,7 +104,7 @@ class BundlingController extends Controller
     /**
      * Update the specified resource in storage.
      */
-    public function update(Request $request, Bundling $bundling, $id)
+    public function update(Request $request, $id)
     {
         $bundling = Bundling::find($id);
 
@@ -121,22 +116,31 @@ class BundlingController extends Controller
             'name' => 'required|string|max:255',
             'price' => 'required|numeric|min:0',
             'category_id' => 'required|exists:categories,id',
-            'image' => 'nullable',
+            'description' => 'required|string',
+            'image' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
             'materials' => 'required|array',
             'materials.*.product_id' => 'required_with:materials|exists:products,id',
             'materials.*.quantity' => 'required_with:materials|integer|min:1',
         ]);
 
+        if ($request->hasFile('image')) {
+
+            if ($bundling->image && Storage::disk('public')->exists($bundling->image)) {
+                Storage::disk('public')->delete($bundling->image);
+            }
+
+            $validated['image'] = $request->file('image')->store('bundlings', 'public');
+        }
+
         $bundling->update($validated);
 
-        if (isset($validated['materials'])) {
-            $bundling->materials()->delete();
-            foreach ($validated['materials'] as $material) {
-                $bundling->materials()->create([
-                    'product_id' => $material['product_id'],
-                    'quantity' => $material['quantity'],
-                ]);
-            }
+        $bundling->materials()->delete();
+
+        foreach ($validated['materials'] as $material) {
+            $bundling->materials()->create([
+                'product_id' => $material['product_id'],
+                'quantity' => $material['quantity'],
+            ]);
         }
 
         ActivityLog::create([
@@ -145,13 +149,10 @@ class BundlingController extends Controller
             'activity_type' => 'crud'
         ]);
 
-        return response()->json(
-            [
-                'message' => 'Bundling updated successfully',
-                'bundling' => $bundling->load('materials')
-            ],
-            200
-        );
+        return response()->json([
+            'message' => 'Bundling updated successfully',
+            'bundling' => $bundling->load('materials.product')
+        ]);
     }
 
     /**

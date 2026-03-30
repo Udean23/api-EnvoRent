@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ActivityLog;
 use App\Models\Product;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 class ProductController extends Controller
 {
@@ -14,12 +15,6 @@ class ProductController extends Controller
     public function index()
     {
         $products = Product::all();
-
-        ActivityLog::create([
-            'user_id' => auth()->user()->id,
-            'description' => 'Viewed all products',
-            'activity_type' => 'crud'
-        ]);
 
         return response()->json([
             'products' => $products
@@ -43,8 +38,14 @@ class ProductController extends Controller
             'name' => 'required|string|max:255',
             'price' => 'required|numeric|min:0',
             'category_id' => 'required|exists:categories,id',
-            'image' => 'nullable',
+            'description' => 'required|string',
+            'image' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
+
+        if ($request->hasFile('image')) {
+            $path = $request->file('image')->store('products', 'public');
+            $validated['image'] = $path;
+        }
 
         $product = Product::create($validated);
 
@@ -54,13 +55,10 @@ class ProductController extends Controller
             'activity_type' => 'crud'
         ]);
 
-        return response()->json(
-            [
-                'message' => 'Product created successfully',
-                'product' => $product
-            ],
-            201
-        );
+        return response()->json([
+            'message' => 'Product created successfully',
+            'product' => $product
+        ], 201);
     }
 
     /**
@@ -107,9 +105,20 @@ class ProductController extends Controller
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'price' => 'required|numeric|min:0',
+            'description' => 'required|string',
             'category_id' => 'required|exists:categories,id',
-            'image' => 'nullable',
+            'image' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
+
+        if ($request->hasFile('image')) {
+
+            if ($product->image && Storage::disk('public')->exists($product->image)) {
+                Storage::disk('public')->delete($product->image);
+            }
+
+            $path = $request->file('image')->store('products', 'public');
+            $validated['image'] = $path;
+        }
 
         $product->update($validated);
 
@@ -119,13 +128,10 @@ class ProductController extends Controller
             'activity_type' => 'crud'
         ]);
 
-        return response()->json(
-            [
-                'message' => 'Product updated successfully',
-                'product' => $product
-            ],
-            200
-        );
+        return response()->json([
+            'message' => 'Product updated successfully',
+            'product' => $product
+        ], 200);
     }
 
     /**

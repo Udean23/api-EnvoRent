@@ -120,4 +120,19 @@ class UserController extends Controller
             'user' => $user
         ]);
     }
+
+    public function getProfile()
+    {
+        $user = auth()->user();
+
+        ActivityLog::create([
+            'user_id' => $user->id,
+            'description' => 'Viewed own profile',
+            'activity_type' => 'crud'
+        ]);
+
+        return response()->json([
+            'user' => $user
+        ]);
+    }
 }

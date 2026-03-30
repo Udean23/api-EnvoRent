@@ -15,12 +15,6 @@ class CategoryController extends Controller
     {
         $categories = Category::all();
 
-        ActivityLog::create([
-            'user_id' => auth()->user()->id,
-            'description' => 'Viewed categories',
-            'activity_type' => 'crud'
-        ]);
-
         return response()->json([
             'categories' => $categories
         ]);

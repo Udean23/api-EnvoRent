@@ -14,24 +14,25 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
 
+Route::get('/products', [ProductController::class, 'index']);
+Route::get('/categories', [CategoryController::class, 'index']);
+Route::get('/bundlings', [BundlingController::class, 'index']);
+
 Route::middleware('auth:sanctum')->group(function () {
 
     // Categories CRUD
-    Route::get('/categories', [CategoryController::class, 'index']);
     Route::post('/categories', [CategoryController::class, 'store']);
     Route::get('/categories/{id}', [CategoryController::class, 'show']);
     Route::put('/categories/{id}', [CategoryController::class, 'update']);
     Route::delete('/categories/{id}', [CategoryController::class, 'destroy']);
 
     // Products CRUD
-    Route::get('/products', [ProductController::class, 'index']);
     Route::post('/products', [ProductController::class, 'store']);
     Route::get('/products/{id}', [ProductController::class, 'show']);
     Route::put('/products/{id}', [ProductController::class, 'update']);
     Route::delete('/products/{id}', [ProductController::class, 'destroy']);
 
     // Bundlings CRUD
-    Route::get('/bundlings', [BundlingController::class, 'index']);
     Route::post('/bundlings', [BundlingController::class, 'store']);
     Route::get('/bundlings/{id}', [BundlingController::class, 'show']);
     Route::put('/bundlings/{id}', [BundlingController::class, 'update']);
@@ -55,4 +56,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Payment Checkout
     Route::post('/payments/checkout', [PaymentController::class, 'checkout']);
+
+    // Get Me
+    Route::get('/me', [UserController::class, 'getProfile']);
 });
