@@ -8,9 +8,15 @@ use Illuminate\Http\Request;
 
 class UserController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
-        $users = User::all();
+        $query = User::query();
+
+        if ($request->has('role')) {
+            $query->where('role', $request->input('role'));
+        }
+
+        $users = $query->get();
 
         ActivityLog::create([
             'user_id' => auth()->user()->id,
