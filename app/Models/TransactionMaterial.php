@@ -9,7 +9,8 @@ class TransactionMaterial extends Model
     protected $fillable = [
         'transaction_id',
         'product_id',
-        'bundling_id'
+        'bundling_id',
+        'quantity',
     ];
 
     public function transaction()

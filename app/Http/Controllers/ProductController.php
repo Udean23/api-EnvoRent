@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ActivityLog;
 use App\Models\Product;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 
 class ProductController extends Controller
@@ -12,9 +13,9 @@ class ProductController extends Controller
     /**
      * Display a listing of the resource.
      */
-    public function index()
+    public function index(Request $request)
     {
-        $products = Product::all();
+        $products = Product::with('category')->latest()->get();
 
         return response()->json([
             'products' => $products
@@ -39,6 +40,7 @@ class ProductController extends Controller
             'price' => 'required|numeric|min:0',
             'category_id' => 'required|exists:categories,id',
             'description' => 'required|string',
+            'stock' => 'required|integer|min:0',
             'image' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
@@ -64,19 +66,20 @@ class ProductController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(Product $product, $id)
+    public function show($id)
     {
-        $product = Product::find($id);
+        $product = Product::with('category')
+            ->withSum(['transactionMaterials as total_quantity' => function($query) {
+                $query->join('transactions', 'transaction_materials.transaction_id', '=', 'transactions.id')
+                      ->whereIn('transactions.status', ['completed', 'accepted']);
+            }], 'quantity')
+            ->find($id);
 
         if (!$product) {
             return response()->json(['message' => 'Product not found'], 404);
         }
 
-        ActivityLog::create([
-            'user_id' => auth()->user()->id,
-            'description' => 'Viewed a product',
-            'activity_type' => 'crud'
-        ]);
+        $product->total_revenue = ($product->total_quantity ?? 0) * $product->price;
 
         return response()->json([
             'product' => $product
@@ -107,6 +110,7 @@ class ProductController extends Controller
             'price' => 'required|numeric|min:0',
             'description' => 'required|string',
             'category_id' => 'required|exists:categories,id',
+            'stock' => 'required|integer|min:0',
             'image' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
