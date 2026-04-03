@@ -13,7 +13,7 @@ class CategoryController extends Controller
      */
     public function index()
     {
-        $categories = Category::all();
+        $categories = Category::withCount('products')->get();
 
         return response()->json([
             'categories' => $categories
@@ -127,6 +127,15 @@ class CategoryController extends Controller
                     'message' => 'Category not found'
                 ],
                 404
+            );
+        }
+
+        if ($category->products()->exists()) {
+            return response()->json(
+                [
+                    'message' => 'Tidak bisa menghapus kategori karena masih ada data barang'
+                ],
+                400
             );
         }
 

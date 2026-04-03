@@ -17,14 +17,14 @@ class AcceptTransactionController extends Controller
 
         $validated = request()->validate([
             'id' => 'nullable|integer|exists:transactions,id',
-            'status' => 'required|in:pending,done,declined,in_use,accepted',
+            'status' => 'required|in:pending,done,declined,in_use,accepted,returning,returned,in_progress',
         ]);
 
         $transaction->update([
             'status' => $validated['status']
         ]);
 
-        if ($validated['status'] === 'returned') {
+        if (in_array($validated['status'], ['returned', 'done'])) {
             foreach ($transaction->materials as $mat) {
                 if ($mat->product_id) {
                     $product = \App\Models\Product::find($mat->product_id);

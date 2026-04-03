@@ -13,7 +13,11 @@ class TransactionController extends Controller
      */
     public function index()
     {
-        $transactions = Transaction::with('materials', 'user')->get();
+        $transactions = Transaction::with([
+            'materials.product',
+            'materials.bundling.materials.product',
+            'user'
+        ])->get();
 
         ActivityLog::create([
             'user_id' => auth()->user()->id,
@@ -42,7 +46,7 @@ class TransactionController extends Controller
         $validated = $request->validate([
             'user_id' => 'required|exists:users,id',
             'price' => 'required|numeric|min:0',
-            'status' => 'nullable|in:pending,completed,cancelled,accepted,done,returning,returned',
+            'status' => 'nullable|in:pending,completed,cancelled,accepted,done,returning,returned,in_use,in_progress',
             'materials' => 'required|array|min:1',
             'materials.*.product_id' => [
                 'nullable',
@@ -104,7 +108,11 @@ class TransactionController extends Controller
      */
     public function show(Transaction $transaction, $id)
     {
-        $transaction = Transaction::with('materials', 'user')->find($id);
+        $transaction = Transaction::with([
+            'materials.product',
+            'materials.bundling.materials.product',
+            'user'
+        ])->find($id);
 
         if (!$transaction) {
             return response()->json([
@@ -149,11 +157,11 @@ class TransactionController extends Controller
             return response()->json(['message' => 'Transaction not found'], 404);
         }
 
-        if ($transaction->status !== 'done') {
-            return response()->json(['message' => 'Can only return completed transactions'], 400);
+        if (!in_array($transaction->status, ['in_use', 'done'])) {
+            return response()->json(['message' => 'Can only return active transactions'], 400);
         }
 
-        $transaction->update(['status' => 'returning']);
+        $transaction->update(['status' => 'in_progress']);
 
         ActivityLog::create([
             'user_id' => auth()->user()->id,

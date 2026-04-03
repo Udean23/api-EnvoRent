@@ -56,8 +56,10 @@ Route::middleware('auth:sanctum')->group(function () {
     // Accept Transaction
     Route::post('/transactions/accept/{id}', [AcceptTransactionController::class, 'accept']);
 
-    // Payment Checkout
+    // Payment
     Route::post('/payments/checkout', [PaymentController::class, 'checkout']);
+    Route::post('/payments/webhook', [PaymentController::class, 'webhook']);
+    Route::post('/payments/offline', [PaymentController::class, 'offline']);
 
     // Get Me
     Route::get('/me', [UserController::class, 'getProfile']);

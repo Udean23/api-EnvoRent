@@ -5,18 +5,10 @@ namespace App\Http\Controllers;
 use App\Models\Payment;
 use App\Models\Transaction;
 use Illuminate\Http\Request;
-use Midtrans\Config;
-use Midtrans\Snap;
+use Illuminate\Support\Str;
 
 class PaymentController extends Controller
 {
-    public function __construct()
-    {
-        Config::$serverKey = config('midtrans.server_key');
-        Config::$isProduction = config('midtrans.is_production');
-        Config::$isSanitized = true;
-        Config::$is3ds = true;
-    }
 
     public function checkout(Request $request)
     {
@@ -43,34 +35,16 @@ class PaymentController extends Controller
             ], 409);
         }
 
+        // Custom Mock Payment Gateway logic
+        $snapToken = 'MOCK-' . Str::random(32);
+        
         $payment = Payment::create([
             'transaction_id' => $transaction->id,
-            'order_id' => 'ORDER-' . time(),
+            'order_id' => $snapToken,
             'gross_amount' => $transaction->price,
             'transaction_status' => 'pending',
+            'midtrans_transaction_id' => $snapToken,
         ]);
-
-        $params = [
-            'transaction_details' => [
-                'order_id' => $payment->order_id,
-                'gross_amount' => $payment->gross_amount,
-            ],
-            'customer_details' => [
-                'first_name' => $transaction->user->name,
-                'email' => $transaction->user->email,
-            ],
-            'enabled_payments' => [
-                'bank_transfer',
-                'gopay',
-                'shopeepay',
-                'qris',
-                'credit_card',
-                'alfamart',
-                'indomaret'
-            ],
-        ];
-
-        $snapToken = Snap::getSnapToken($params);
 
         return response()->json([
             'message' => 'Checkout created',
@@ -93,7 +67,7 @@ class PaymentController extends Controller
             'transaction_status' => $payload['transaction_status'] ?? $payment->transaction_status,
             'payment_type' => $payload['payment_type'] ?? null,
             'fraud_status' => $payload['fraud_status'] ?? null,
-            'midtrans_transaction_id' => $payload['transaction_id'] ?? null,
+            'midtrans_transaction_id' => $payload['order_id'] ?? null,
             'raw_response' => $payload,
             'paid_at' => in_array($payload['transaction_status'], ['settlement', 'capture'])
                 ? now()
@@ -102,7 +76,7 @@ class PaymentController extends Controller
 
         if (in_array($payload['transaction_status'], ['settlement', 'capture'])) {
             $transaction = $payment->transaction;
-            $transaction->update(['status' => 'done']);
+            $transaction->update(['status' => 'in_use']);
 
             foreach ($transaction->materials as $mat) {
                 if ($mat->product_id) {
@@ -136,5 +110,55 @@ class PaymentController extends Controller
         }
 
         return response()->json($payment);
+    }
+
+    public function offline(Request $request)
+    {
+        $validated = $request->validate([
+            'transaction_id' => 'required|exists:transactions,id',
+            'amount_paid' => 'required|numeric'
+        ]);
+
+        $transaction = Transaction::findOrFail($validated['transaction_id']);
+
+        if (!in_array($transaction->status, ['accepted', 'pending'])) {
+            return response()->json(['message' => 'Transaction cannot be paid offline at this status'], 422);
+        }
+
+        // Create offline payment
+        $payment = Payment::create([
+            'transaction_id' => $transaction->id,
+            'order_id' => 'OFFLINE-' . Str::random(12),
+            'gross_amount' => $validated['amount_paid'],
+            'transaction_status' => 'settlement',
+            'payment_type' => 'cash_offline',
+            'midtrans_transaction_id' => 'OFFLINE-' . Str::random(12),
+            'paid_at' => now(),
+            'raw_response' => ['note' => 'Paid offline via Cashier']
+        ]);
+
+        // Update transaction status
+        $transaction->update(['status' => 'in_use']);
+
+        // Decrement stock
+        foreach ($transaction->materials as $mat) {
+            if ($mat->product_id) {
+                $product = \App\Models\Product::find($mat->product_id);
+                if ($product) { $product->decrement('stock', $mat->quantity); }
+            } elseif ($mat->bundling_id) {
+                $bundling = \App\Models\Bundling::with('materials')->find($mat->bundling_id);
+                if ($bundling) {
+                    foreach ($bundling->materials as $bMat) {
+                        $product = \App\Models\Product::find($bMat->product_id);
+                        if ($product) { $product->decrement('stock', $bMat->quantity * $mat->quantity); }
+                    }
+                }
+            }
+        }
+
+        return response()->json([
+            'message' => 'Offline payment processed successfully',
+            'payment' => $payment
+        ]);
     }
 }
