@@ -15,6 +15,9 @@ Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
 
+Route::get('/auth/google', [App\Http\Controllers\SocialAuthController::class, 'redirectToGoogle']);
+Route::post('/auth/google/callback', [App\Http\Controllers\SocialAuthController::class, 'handleGoogleCallback']);
+
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/{id}', [ProductController::class, 'show']);
 Route::get('/categories', [CategoryController::class, 'index']);
