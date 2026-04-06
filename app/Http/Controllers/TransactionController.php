@@ -47,6 +47,8 @@ class TransactionController extends Controller
             'user_id' => 'required|exists:users,id',
             'price' => 'required|numeric|min:0',
             'status' => 'nullable|in:pending,completed,cancelled,accepted,done,returning,returned,in_use,in_progress',
+            'start_date' => 'required|date',
+            'end_date' => 'required|date|after_or_equal:start_date',
             'materials' => 'required|array|min:1',
             'materials.*.product_id' => [
                 'nullable',
@@ -61,16 +63,20 @@ class TransactionController extends Controller
             'materials.*.quantity' => 'required|integer|min:1',
         ]);
 
-        foreach ($validated['materials'] as $index => $material) {
-            if (!empty($material['product_id']) && !empty($material['bundling_id'])) {
-                return response()->json([
-                    'message' => 'Invalid materials data',
-                    'errors' => [
-                        "materials.$index" => [
-                            'Only one of product_id or bundling_id is allowed'
-                        ]
-                    ]
-                ], 422);
+        foreach ($validated['materials'] as $index => $mat) {
+            if (!empty($mat['product_id'])) {
+                $product = \App\Models\Product::find($mat['product_id']);
+                if ($product->stock < $mat['quantity']) {
+                    return response()->json(['message' => "Stok produk '{$product->name}' tidak mencukupi"], 422);
+                }
+            } elseif (!empty($mat['bundling_id'])) {
+                $bundling = \App\Models\Bundling::with('materials.product')->find($mat['bundling_id']);
+                foreach ($bundling->materials as $bm) {
+                    $requiredQty = $bm->quantity * $mat['quantity'];
+                    if ($bm->product->stock < $requiredQty) {
+                        return response()->json(['message' => "Stok produk '{$bm->product->name}' dalam bundling tidak mencukupi"], 422);
+                    }
+                }
             }
         }
 
@@ -78,28 +84,36 @@ class TransactionController extends Controller
             'user_id' => $validated['user_id'],
             'price' => $validated['price'],
             'status' => $validated['status'] ?? 'pending',
+            'start_date' => $validated['start_date'],
+            'end_date' => $validated['end_date'],
         ]);
 
-        foreach ($validated['materials'] as $material) {
+        foreach ($validated['materials'] as $mat) {
             $transaction->materials()->create([
-                'product_id' => $material['product_id'] ?? null,
-                'bundling_id' => $material['bundling_id'] ?? null,
-                'quantity' => $material['quantity'],
+                'product_id' => $mat['product_id'] ?? null,
+                'bundling_id' => $mat['bundling_id'] ?? null,
+                'quantity' => $mat['quantity'],
             ]);
+
+            if (!empty($mat['product_id'])) {
+                \App\Models\Product::find($mat['product_id'])->decrement('stock', $mat['quantity']);
+            } elseif (!empty($mat['bundling_id'])) {
+                $bundling = \App\Models\Bundling::with('materials')->find($mat['bundling_id']);
+                foreach ($bundling->materials as $bm) {
+                    \App\Models\Product::find($bm->product_id)->decrement('stock', $bm->quantity * $mat['quantity']);
+                }
+            }
         }
 
         ActivityLog::create([
             'user_id' => auth()->id(),
-            'description' => 'Created a new transaction',
+            'description' => 'Created a new transaction and reserved stock',
             'activity_type' => 'crud',
         ]);
 
         return response()->json([
             'message' => 'Transaction created successfully',
-            'transaction' => $transaction->load([
-                'materials.product',
-                'materials.bundling'
-            ])
+            'transaction' => $transaction->load(['materials.product', 'materials.bundling'])
         ], 201);
     }
 

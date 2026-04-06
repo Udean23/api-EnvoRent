@@ -72,4 +72,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Dashboard
     Route::get('/dashboard', [DashboardController::class, 'index']);
+
+    // Reports & Fines
+    Route::get('/reports/financial', [App\Http\Controllers\FinancialReportController::class, 'index']);
 });

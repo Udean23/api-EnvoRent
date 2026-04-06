@@ -16,15 +16,32 @@ class AcceptTransactionController extends Controller
         }
 
         $validated = request()->validate([
-            'id' => 'nullable|integer|exists:transactions,id',
-            'status' => 'required|in:pending,done,declined,in_use,accepted,returning,returned,in_progress',
+            'status' => 'required|in:pending,done,declined,in_use,accepted,returning,returned,in_progress,cancelled',
         ]);
+
+        $oldStatus = $transaction->status;
+        $newStatus = $validated['status'];
 
         $transaction->update([
-            'status' => $validated['status']
+            'status' => $newStatus,
+            'returned_at' => in_array($newStatus, ['returned', 'done']) ? now() : $transaction->returned_at
         ]);
 
-        if (in_array($validated['status'], ['returned', 'done'])) {
+        if (in_array($newStatus, ['returned', 'done']) && $transaction->end_date) {
+            $endDate = \Carbon\Carbon::parse($transaction->end_date);
+            $returnedDate = now();
+            if ($returnedDate->greaterThan($endDate)) {
+                $daysLate = (int) $endDate->diffInDays($returnedDate, false);
+                if ($daysLate > 0) {
+                    $transaction->update(['fine_amount' => $daysLate * 50000]);
+                }
+            }
+        }
+
+        $activeStatuses = ['pending', 'accepted', 'in_use', 'returning', 'in_progress'];
+        $returnableStatuses = ['done', 'returned', 'declined', 'cancelled'];
+
+        if (in_array($newStatus, $returnableStatuses) && in_array($oldStatus, $activeStatuses)) {
             foreach ($transaction->materials as $mat) {
                 if ($mat->product_id) {
                     $product = \App\Models\Product::find($mat->product_id);
@@ -46,7 +63,7 @@ class AcceptTransactionController extends Controller
         }
 
         return response()->json([
-            'message' => "Transaction {$id} updated to status '{$validated['status']}'"
+            'message' => "Transaction {$id} updated to status '{$newStatus}'"
         ], 200);
     }
 }

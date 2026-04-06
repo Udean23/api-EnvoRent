@@ -10,92 +10,104 @@ use Illuminate\Support\Str;
 class PaymentController extends Controller
 {
 
+    public function __construct()
+    {
+        \Midtrans\Config::$serverKey = env('MIDTRANS_SERVER_KEY');
+        \Midtrans\Config::$isProduction = env('MIDTRANS_IS_PRODUCTION', false);
+        \Midtrans\Config::$isSanitized = true;
+        \Midtrans\Config::$is3ds = true;
+        
+        if (config('app.env') !== 'production') {
+            \Midtrans\Config::$curlOptions = [
+                CURLOPT_SSL_VERIFYPEER => false,
+            ];
+        }
+    }
+
     public function checkout(Request $request)
     {
         $validated = $request->validate([
             'transaction_id' => 'required|exists:transactions,id',
         ]);
 
-        $transaction = Transaction::findOrFail($validated['transaction_id']);
+        $transaction = Transaction::with(['user', 'materials.product', 'materials.bundling'])->findOrFail($validated['transaction_id']);
 
-        if ($transaction->status !== 'accepted') {
-            return response()->json([
-                'message' => 'Transaction must be accepted before checkout'
-            ], 422);
+        if (!in_array($transaction->status, ['accepted', 'pending'])) {
+            return response()->json(['message' => 'Transaction status must be accepted or pending'], 422);
         }
 
-        $existingPayment = Payment::where('transaction_id', $transaction->id)
-            ->whereIn('transaction_status', ['pending', 'settlement', 'capture'])
-            ->first();
+        $params = [
+            'transaction_details' => [
+                'order_id' => 'TRX-' . $transaction->id . '-' . Str::random(5),
+                'gross_amount' => (int) $transaction->price,
+            ],
+            'customer_details' => [
+                'first_name' => $transaction->user->name,
+                'email' => $transaction->user->email,
+            ],
+            'item_details' => $transaction->materials->map(function ($m) {
+                return [
+                    'id' => $m->product_id ?? $m->bundling_id,
+                    'price' => (int) ($m->product->price ?? $m->bundling->price ?? 0),
+                    'quantity' => $m->quantity,
+                    'name' => Str::limit($m->product->name ?? $m->bundling->name ?? 'Item', 50),
+                ];
+            })->toArray(),
+        ];
 
-        if ($existingPayment) {
+        try {
+            $snapToken = \Midtrans\Snap::getSnapToken($params);
+
+            Payment::updateOrCreate(
+                ['transaction_id' => $transaction->id],
+                [
+                    'order_id' => $params['transaction_details']['order_id'],
+                    'gross_amount' => $transaction->price,
+                    'transaction_status' => 'pending',
+                    'midtrans_transaction_id' => null,
+                ]
+            );
+
             return response()->json([
-                'message' => 'This transaction already has an active payment',
-                'payment' => $existingPayment
-            ], 409);
+                'snap_token' => $snapToken,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['message' => $e->getMessage()], 500);
         }
-
-        // Custom Mock Payment Gateway logic
-        $snapToken = 'MOCK-' . Str::random(32);
-        
-        $payment = Payment::create([
-            'transaction_id' => $transaction->id,
-            'order_id' => $snapToken,
-            'gross_amount' => $transaction->price,
-            'transaction_status' => 'pending',
-            'midtrans_transaction_id' => $snapToken,
-        ]);
-
-        return response()->json([
-            'message' => 'Checkout created',
-            'snap_token' => $snapToken,
-            'payment' => $payment
-        ]);
     }
 
     public function webhook(Request $request)
     {
-        $payload = $request->all();
+        $notif = new \Midtrans\Notification();
 
-        $payment = Payment::where('order_id', $payload['order_id'] ?? null)->first();
+        $transactionStatus = $notif->transaction_status;
+        $type = $notif->payment_type;
+        $orderId = $notif->order_id;
+        $fraudStatus = $notif->fraud_status;
+
+        $payment = Payment::where('order_id', $orderId)->first();
 
         if (!$payment) {
             return response()->json(['message' => 'Payment not found'], 404);
         }
 
-        $payment->update([
-            'transaction_status' => $payload['transaction_status'] ?? $payment->transaction_status,
-            'payment_type' => $payload['payment_type'] ?? null,
-            'fraud_status' => $payload['fraud_status'] ?? null,
-            'midtrans_transaction_id' => $payload['order_id'] ?? null,
-            'raw_response' => $payload,
-            'paid_at' => in_array($payload['transaction_status'], ['settlement', 'capture'])
-                ? now()
-                : null,
-        ]);
-
-        if (in_array($payload['transaction_status'], ['settlement', 'capture'])) {
-            $transaction = $payment->transaction;
-            $transaction->update(['status' => 'in_use']);
-
-            foreach ($transaction->materials as $mat) {
-                if ($mat->product_id) {
-                    $product = \App\Models\Product::find($mat->product_id);
-                    if ($product) {
-                        $product->decrement('stock', $mat->quantity);
-                    }
-                } elseif ($mat->bundling_id) {
-                    $bundling = \App\Models\Bundling::with('materials')->find($mat->bundling_id);
-                    if ($bundling) {
-                        foreach ($bundling->materials as $bMat) {
-                            $product = \App\Models\Product::find($bMat->product_id);
-                            if ($product) {
-                                $product->decrement('stock', $bMat->quantity * $mat->quantity);
-                            }
-                        }
-                    }
+        if ($transactionStatus == 'capture') {
+            if ($type == 'credit_card') {
+                if ($fraudStatus == 'challenge') {
+                    $payment->update(['transaction_status' => 'challenge']);
+                } else {
+                    $payment->update(['transaction_status' => 'settlement']);
                 }
             }
+        } elseif ($transactionStatus == 'settlement') {
+            $payment->update(['transaction_status' => 'settlement']);
+        } elseif (in_array($transactionStatus, ['pending', 'deny', 'expire', 'cancel'])) {
+            $payment->update(['transaction_status' => $transactionStatus]);
+        }
+
+        if ($payment->transaction_status == 'settlement') {
+            $payment->update(['paid_at' => now()]);
+            $payment->transaction->update(['status' => 'in_use']);
         }
 
         return response()->json(['message' => 'Webhook processed']);
@@ -104,11 +116,7 @@ class PaymentController extends Controller
     public function status($transactionId)
     {
         $payment = Payment::where('transaction_id', $transactionId)->first();
-
-        if (!$payment) {
-            return response()->json(['message' => 'Payment not found'], 404);
-        }
-
+        if (!$payment) return response()->json(['message' => 'Payment not found'], 404);
         return response()->json($payment);
     }
 
@@ -121,11 +129,6 @@ class PaymentController extends Controller
 
         $transaction = Transaction::findOrFail($validated['transaction_id']);
 
-        if (!in_array($transaction->status, ['accepted', 'pending'])) {
-            return response()->json(['message' => 'Transaction cannot be paid offline at this status'], 422);
-        }
-
-        // Create offline payment
         $payment = Payment::create([
             'transaction_id' => $transaction->id,
             'order_id' => 'OFFLINE-' . Str::random(12),
@@ -134,27 +137,10 @@ class PaymentController extends Controller
             'payment_type' => 'cash_offline',
             'midtrans_transaction_id' => 'OFFLINE-' . Str::random(12),
             'paid_at' => now(),
-            'raw_response' => ['note' => 'Paid offline via Cashier']
+            'raw_response' => ['note' => 'Paid offline']
         ]);
 
-        // Update transaction status
         $transaction->update(['status' => 'in_use']);
-
-        // Decrement stock
-        foreach ($transaction->materials as $mat) {
-            if ($mat->product_id) {
-                $product = \App\Models\Product::find($mat->product_id);
-                if ($product) { $product->decrement('stock', $mat->quantity); }
-            } elseif ($mat->bundling_id) {
-                $bundling = \App\Models\Bundling::with('materials')->find($mat->bundling_id);
-                if ($bundling) {
-                    foreach ($bundling->materials as $bMat) {
-                        $product = \App\Models\Product::find($bMat->product_id);
-                        if ($product) { $product->decrement('stock', $bMat->quantity * $mat->quantity); }
-                    }
-                }
-            }
-        }
 
         return response()->json([
             'message' => 'Offline payment processed successfully',
