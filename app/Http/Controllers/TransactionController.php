@@ -16,7 +16,8 @@ class TransactionController extends Controller
         $transactions = Transaction::with([
             'materials.product',
             'materials.bundling.materials.product',
-            'user'
+            'user',
+            'payments'
         ])->get();
 
         ActivityLog::create([

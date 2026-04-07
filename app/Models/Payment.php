@@ -11,6 +11,7 @@ class Payment extends Model
         'order_id',
         'gross_amount',
         'payment_type',
+        'payment_for',
         'transaction_status',
         'fraud_status',
         'midtrans_transaction_id',

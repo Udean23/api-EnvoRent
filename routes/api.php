@@ -60,8 +60,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/transactions/accept/{id}', [AcceptTransactionController::class, 'accept']);
 
     // Payment
-    Route::post('/payments/checkout', [PaymentController::class, 'checkout']);
-    Route::post('/payments/webhook', [PaymentController::class, 'webhook']);
+    Route::post('/payments/credit-card', [PaymentController::class, 'creditCard']);
     Route::post('/payments/offline', [PaymentController::class, 'offline']);
 
     // Get Me
