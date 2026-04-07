@@ -4,12 +4,13 @@ use App\Http\Controllers\AcceptTransactionController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BundlingController;
 use App\Http\Controllers\CategoryController;
+use App\Http\Controllers\ConversationController;
+use App\Http\Controllers\MessageController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\ProductController;
 use App\Http\Controllers\TransactionController;
 use App\Http\Controllers\UserController;
-use App\Http\Controllers\DashboardController;
-use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\AIChatController;
 
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
@@ -22,6 +23,9 @@ Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/{id}', [ProductController::class, 'show']);
 Route::get('/categories', [CategoryController::class, 'index']);
 Route::get('/bundlings', [BundlingController::class, 'index']);
+
+// Xendit Webhook (no auth required)
+Route::post('/webhooks/xendit', [PaymentController::class, 'webhook']);
 
 Route::middleware('auth:sanctum')->group(function () {
 
@@ -61,7 +65,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Payment
     Route::post('/payments/credit-card', [PaymentController::class, 'creditCard']);
-    Route::post('/payments/offline', [PaymentController::class, 'offline']);
+    Route::post('/payments/invoice', [PaymentController::class, 'createInvoice']);
+    Route::post('/payments/virtual-account', [PaymentController::class, 'virtualAccount']);
+    Route::get('/payments/status/{transactionId}', [PaymentController::class, 'status']);
 
     // Get Me
     Route::get('/me', [UserController::class, 'getProfile']);
@@ -74,4 +80,17 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Reports & Fines
     Route::get('/reports/financial', [App\Http\Controllers\FinancialReportController::class, 'index']);
+
+    // Chat & Conversations
+    Route::get('/conversations', [ConversationController::class, 'index']);
+    Route::get('/conversations/{conversation}', [ConversationController::class, 'show']);
+    Route::post('/conversations/user/{userId}', [ConversationController::class, 'getOrCreate']);
+    
+    // Messages
+    Route::post('/conversations/{conversation}/messages', [MessageController::class, 'store']);
+    Route::put('/messages/{message}/read', [MessageController::class, 'markAsRead']);
+    Route::put('/conversations/{conversation}/read-all', [MessageController::class, 'markConversationAsRead']);
+
+    // AI Chat
+    Route::post('/ai-chat/send-message', [AIChatController::class, 'sendMessage']);
 });

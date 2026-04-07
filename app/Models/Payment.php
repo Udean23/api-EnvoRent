@@ -15,6 +15,8 @@ class Payment extends Model
         'transaction_status',
         'fraud_status',
         'midtrans_transaction_id',
+        'xendit_invoice_id',
+        'xendit_transaction_id',
         'raw_response',
         'paid_at',
     ];

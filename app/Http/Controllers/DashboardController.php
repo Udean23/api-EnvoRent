@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\DB;
 
 class DashboardController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
         $now = Carbon::now();
         $thisMonth = $now->month;
@@ -21,7 +21,21 @@ class DashboardController extends Controller
         $lastMonth = $now->copy()->subMonth()->month;
         $lastMonthYear = $now->copy()->subMonth()->year;
 
-        $totalPenjualan = Transaction::where('status', 'done')
+        $startDate = $request->input('start_date');
+        $endDate = $request->input('end_date');
+        $dateFilter = null;
+        if ($startDate && $endDate) {
+            $dateFilter = [$startDate, $endDate];
+        }
+
+        $applyDateFilter = function ($query) use ($dateFilter) {
+            if ($dateFilter) {
+                return $query->whereBetween('created_at', $dateFilter);
+            }
+            return $query;
+        };
+
+        $totalPenjualan = $applyDateFilter(Transaction::where('status', 'done'))
             ->selectRaw('SUM(price + fine_amount) as total')
             ->value('total') ?? 0;
         
@@ -29,6 +43,9 @@ class DashboardController extends Controller
             ->whereMonth('created_at', $thisMonth)
             ->whereYear('created_at', $thisYear)
             ->selectRaw('SUM(price + fine_amount) as total')
+            ->when($dateFilter, function ($query) use ($dateFilter) {
+                return $query->whereBetween('created_at', $dateFilter);
+            })
             ->value('total') ?? 0;
 
         $revenueLastMonth = Transaction::where('status', 'done')
@@ -45,9 +62,13 @@ class DashboardController extends Controller
         $target = 50000000;
         $salesProgress = min(100, ($revenueThisMonth / $target) * 100);
 
-        $totalProduk = Product::count();
+        $totalProduk = Product::when($dateFilter, function ($query) use ($dateFilter) {
+            return $query->whereBetween('created_at', $dateFilter);
+        })->count();
         $totalPelanggan = User::where('role', 'user')->count();
-        $totalPesanan = Transaction::count();
+        $totalPesanan = Transaction::where('status', 'done')->when($dateFilter, function ($query) use ($dateFilter) {
+            return $query->whereBetween('created_at', $dateFilter);
+        })->count();
 
         ActivityLog::create([
             'user_id' => auth()->user()->id,
@@ -77,7 +98,7 @@ class DashboardController extends Controller
             $yearlySales[] = $sum;
         }
 
-        $recentTransactions = Transaction::with('user')
+        $recentTransactions = $applyDateFilter(Transaction::with('user'))
             ->latest()
             ->take(5)
             ->get()
@@ -96,6 +117,9 @@ class DashboardController extends Controller
             ->join('transaction_materials', 'products.id', '=', 'transaction_materials.product_id')
             ->join('transactions', 'transactions.id', '=', 'transaction_materials.transaction_id')
             ->where('transactions.status', 'done')
+            ->when($dateFilter, function ($query) use ($dateFilter) {
+                return $query->whereBetween('transactions.created_at', $dateFilter);
+            })
             ->groupBy('categories.id', 'categories.name')
             ->orderByDesc('total_sold')
             ->take(5)
@@ -104,6 +128,9 @@ class DashboardController extends Controller
         $produkTerlaris = Product::join('transaction_materials', 'products.id', '=', 'transaction_materials.product_id')
             ->join('transactions', 'transactions.id', '=', 'transaction_materials.transaction_id')
             ->where('transactions.status', 'done')
+            ->when($dateFilter, function ($query) use ($dateFilter) {
+                return $query->whereBetween('transactions.created_at', $dateFilter);
+            })
             ->selectRaw('products.id, products.name, products.image, SUM(transaction_materials.quantity) as total_sold')
             ->groupBy('products.id', 'products.name', 'products.image')
             ->orderByDesc('total_sold')
@@ -120,8 +147,8 @@ class DashboardController extends Controller
             });
 
 
-        $allCompletedRentals = Transaction::with(['user', 'materials.product', 'materials.bundling'])
-            ->where('status', 'done')
+        $allCompletedRentals = $applyDateFilter(Transaction::with(['user', 'materials.product', 'materials.bundling'])
+            ->where('status', 'done'))
             ->latest()
             ->get()
             ->map(function ($t) {
